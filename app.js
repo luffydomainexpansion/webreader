@@ -1,6 +1,6 @@
 /**
- * Multi-Novel Web Reader
- * Supports: Let Me Game In Peace, The King's Avatar, Super Gene
+ * Donghua Web Novel Reader
+ * Supports Library Bookshelf, Novel Details & TOC, and Distraction-free Chapter Reader
  */
 
 (function () {
@@ -13,8 +13,9 @@
   let tocData = null;
   let currentChapterId = 1;
   let currentChapterData = null;
-  let currentView = 'home'; // 'home' | 'reader'
+  let currentView = 'library'; // 'library' | 'novel' | 'reader'
   let currentVolFilter = 'all';
+  let shelfFilter = 'all';
 
   const defaultSettings = {
     theme: 'dark',
@@ -30,11 +31,17 @@
   let settings = Object.assign({}, defaultSettings);
 
   // --- DOM ELEMENTS ---
-  const homeView = document.getElementById('home-view');
+  const libraryView = document.getElementById('library-view');
+  const novelDetailView = document.getElementById('novel-detail-view');
   const readerView = document.getElementById('reader-view');
+
   const appHeader = document.getElementById('app-header');
+  const btnHeaderBack = document.getElementById('btn-header-back');
+  const headerLogoText = document.getElementById('header-logo-text');
   const headerNovelTitle = document.getElementById('header-novel-title');
   const headerChapterTitle = document.getElementById('header-chapter-title');
+  const btnChapters = document.getElementById('btn-chapters');
+  const btnSettings = document.getElementById('btn-settings');
   const mobileBottomNav = document.getElementById('mobile-bottom-nav');
 
   let lastScrollY = window.scrollY || 0;
@@ -51,13 +58,21 @@
     }
   }
 
-  // Home Hero elements
-  const novelSwitchBar = document.getElementById('novel-switch-bar');
+  // Library Bookshelf Elements
+  const spotlightSection = document.getElementById('spotlight-section');
+  const novelsGrid = document.getElementById('novels-grid');
+  const countAll = document.getElementById('count-all');
+  const countReading = document.getElementById('count-reading');
+  const countCompleted = document.getElementById('count-completed');
+
+  // Novel Detail View Elements
+  const btnBackToLibrary = document.getElementById('btn-back-to-library');
   const novelCoverImg = document.getElementById('novel-cover-img');
   const novelTitleEl = document.getElementById('novel-title');
   const novelAuthorEl = document.getElementById('novel-author');
   const metaChaptersEl = document.getElementById('meta-chapters');
   const metaVolumesEl = document.getElementById('meta-volumes');
+  const metaStatusEl = document.getElementById('meta-status');
   const novelSynopsisEl = document.getElementById('novel-synopsis');
   const btnContinue = document.getElementById('btn-continue-reading');
   const continueText = document.getElementById('continue-text');
@@ -76,20 +91,12 @@
   const chapterTitleEl = document.getElementById('chapter-title');
   const chapterBodyEl = document.getElementById('chapter-body');
 
-  // Buttons
-  const btnHome = document.getElementById('btn-home');
-  const btnLibrary = document.getElementById('btn-library');
+  // Mobile Bottom Nav Buttons
   const btnMobileLibrary = document.getElementById('btn-mobile-library');
-  const btnChapters = document.getElementById('btn-chapters');
-  const btnSettings = document.getElementById('btn-settings');
   const btnMobileChapters = document.getElementById('btn-mobile-chapters');
   const btnMobileSettings = document.getElementById('btn-mobile-settings');
 
   // Modals
-  const modalLibrary = document.getElementById('modal-library');
-  const btnCloseLibrary = document.getElementById('btn-close-library');
-  const libraryCardsList = document.getElementById('library-cards-list');
-
   const modalChapters = document.getElementById('modal-chapters');
   const modalChaptersTitle = document.getElementById('modal-chapters-title');
   const btnCloseChapters = document.getElementById('btn-close-chapters');
@@ -206,161 +213,261 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       novels = await res.json();
 
-      renderNovelSwitchBar();
-      renderLibraryCards();
+      updateShelfCounters();
+      renderSpotlightCard();
+      renderNovelsGrid();
 
-      // Determine initial novel from URL or localStorage
       parseInitialRoute();
+      window.addEventListener('hashchange', handleHashChange);
     } catch (err) {
       console.error('Error loading novels index:', err);
     }
   }
 
-  function parseInitialRoute() {
-    const hash = window.location.hash || '';
-
-    // Route format: #<novelId>/<chapterId> or #<novelId>
-    let matchedNovel = 'lmgip';
-    let matchedChapter = null;
-
-    const parts = hash.replace(/^#/, '').split('/');
-    if (parts[0]) {
-      const found = novels.find(n => n.id === parts[0].toLowerCase());
-      if (found) {
-        matchedNovel = found.id;
-        if (parts[1]) {
-          matchedChapter = parseInt(parts[1], 10);
-        }
-      } else {
-        // Fallback: check #chapter-X legacy
-        const legacyMatch = hash.match(/#chapter-(\d+)/);
-        if (legacyMatch) {
-          matchedChapter = parseInt(legacyMatch[1], 10);
-        }
+  function getUserNovelProgress(novelId) {
+    try {
+      const val = localStorage.getItem(`novel_last_chapter_${novelId}`);
+      if (val !== null && !isNaN(parseInt(val, 10))) {
+        return parseInt(val, 10);
       }
-    } else {
-      try {
-        const savedNovel = localStorage.getItem('novel_reader_current_novel');
-        if (savedNovel && novels.some(n => n.id === savedNovel)) {
-          matchedNovel = savedNovel;
-        }
-      } catch (e) {}
-    }
-
-    switchNovel(matchedNovel, matchedChapter);
-    window.addEventListener('hashchange', handleHashChange);
+    } catch (e) {}
+    return null;
   }
 
-  function handleHashChange() {
-    const hash = window.location.hash || '';
-    const parts = hash.replace(/^#/, '').split('/');
-    if (!parts[0] || parts[0] === 'home') {
-      showHomeView();
+  function getNovelUserStatus(novel) {
+    if (!novel) return { status: 'unread', label: 'Unread', chapter: 1 };
+    const saved = getUserNovelProgress(novel.id);
+    if (saved === null) {
+      return { status: 'unread', label: 'Unread', chapter: 1 };
+    }
+    if (saved >= novel.total_chapters) {
+      return { status: 'completed', label: 'Finished', chapter: saved };
+    }
+    return { status: 'reading', label: `Ch. ${saved} / ${novel.total_chapters}`, chapter: saved };
+  }
+
+  function getMostRecentlyReadNovel() {
+    try {
+      const active = localStorage.getItem('novel_reader_current_novel');
+      if (active && novels.some(n => n.id === active)) {
+        return novels.find(n => n.id === active);
+      }
+    } catch (e) {}
+    const reading = novels.find(n => getNovelUserStatus(n).status === 'reading');
+    return reading || novels[0];
+  }
+
+  // --- VIEW 1: LIBRARY BOOKSHELF HOMEPAGE ---
+  function showLibraryView() {
+    currentView = 'library';
+    libraryView.style.display = 'block';
+    novelDetailView.style.display = 'none';
+    readerView.style.display = 'none';
+    document.body.classList.remove('in-reader-mode');
+
+    // Header state
+    btnHeaderBack.title = 'Library';
+    headerLogoText.style.display = 'inline-block';
+    headerNovelTitle.textContent = '';
+    headerChapterTitle.textContent = '';
+    btnChapters.style.display = 'none';
+    setNavVisibility(false);
+
+    document.title = 'Donghua Web Novel Reader';
+    updateShelfCounters();
+    renderSpotlightCard();
+    renderNovelsGrid();
+  }
+
+  function updateShelfCounters() {
+    if (!countAll) return;
+    countAll.textContent = novels.length;
+    countReading.textContent = novels.filter(n => getNovelUserStatus(n).status === 'reading').length;
+    countCompleted.textContent = novels.filter(n => getNovelUserStatus(n).status === 'completed').length;
+  }
+
+  function renderSpotlightCard() {
+    if (!spotlightSection || novels.length === 0) return;
+    const novel = getMostRecentlyReadNovel();
+    const userProg = getNovelUserStatus(novel);
+    const isCurrentlyReading = userProg.status === 'reading';
+    const isFinished = userProg.status === 'completed';
+    const chapterToRead = isFinished ? 1 : userProg.chapter;
+
+    let badgeText = '⭐ Featured Novel';
+    let buttonText = 'Start Reading (Ch. 1)';
+    let progressTag = `${novel.total_chapters.toLocaleString()} Chapters`;
+
+    if (isCurrentlyReading) {
+      badgeText = '🟢 Currently Reading';
+      buttonText = `Resume Ch. ${chapterToRead}`;
+      progressTag = `Ch. ${chapterToRead} of ${novel.total_chapters}`;
+    } else if (isFinished) {
+      badgeText = '🏆 Finished';
+      buttonText = 'Re-read from Ch. 1';
+      progressTag = `Completed (${novel.total_chapters} Ch.)`;
+    }
+
+    spotlightSection.innerHTML = `
+      <div class="spotlight-card">
+        <div class="novel-cover-wrap" style="width:140px; min-width:120px;">
+          <img src="${novel.cover}" alt="${escapeHTML(novel.title)}" class="novel-cover" onerror="this.src='${novel.cover_fallback||novel.cover}'">
+        </div>
+        <div class="novel-info">
+          <div class="spotlight-badge">${badgeText}</div>
+          <h2 class="novel-title" style="font-size:24px; cursor:pointer;" onclick="location.hash='#novel/${novel.id}'">${escapeHTML(novel.title)}</h2>
+          <p class="novel-author">By <span>${escapeHTML(novel.author)}</span></p>
+          <div class="novel-meta-tags">
+            <span class="meta-tag">${progressTag}</span>
+            <span class="meta-tag">${novel.volumes_count} Volumes</span>
+            <span class="meta-tag">${novel.status}</span>
+          </div>
+          <p class="novel-synopsis" style="margin-bottom:18px;">${escapeHTML(novel.synopsis)}</p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" onclick="location.hash='#read/${novel.id}/${chapterToRead}'">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>${buttonText}</span>
+            </button>
+            <button class="btn btn-secondary" onclick="location.hash='#novel/${novel.id}'">
+              <span>View Chapters</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderNovelsGrid() {
+    if (!novelsGrid) return;
+    novelsGrid.innerHTML = '';
+
+    let list = novels;
+    if (shelfFilter === 'reading') {
+      list = list.filter(n => getNovelUserStatus(n).status === 'reading');
+    } else if (shelfFilter === 'completed') {
+      list = list.filter(n => getNovelUserStatus(n).status === 'completed');
+    }
+
+    if (list.length === 0) {
+      novelsGrid.innerHTML = '<div class="loading-state" style="grid-column: 1/-1;">No novels in this filter.</div>';
       return;
     }
 
-    const novel = novels.find(n => n.id === parts[0].toLowerCase());
-    if (novel) {
-      if (parts[1]) {
-        const chNum = parseInt(parts[1], 10);
-        if (currentNovelId !== novel.id) {
-          switchNovel(novel.id, chNum);
-        } else {
-          showReaderView(chNum);
-        }
+    const frag = document.createDocumentFragment();
+    list.forEach(n => {
+      const userProg = getNovelUserStatus(n);
+      const isReading = userProg.status === 'reading';
+      const isFinished = userProg.status === 'completed';
+
+      let badgeHtml = '';
+      let readBtnText = 'Start Reading';
+      let targetCh = 1;
+
+      if (isReading) {
+        badgeHtml = `<span class="status-badge reading">🟢 Ch. ${userProg.chapter} / ${n.total_chapters}</span>`;
+        readBtnText = `Resume Ch. ${userProg.chapter}`;
+        targetCh = userProg.chapter;
+      } else if (isFinished) {
+        badgeHtml = `<span class="status-badge completed">🏆 Finished</span>`;
+        readBtnText = `Re-read Ch. 1`;
+        targetCh = 1;
       } else {
-        if (currentNovelId !== novel.id) {
-          switchNovel(novel.id, null);
-        } else {
-          showHomeView();
-        }
+        badgeHtml = `<span class="status-badge" style="background:var(--btn-bg); color:var(--text-muted); border:1px solid var(--card-border);">✨ Unread</span>`;
+        readBtnText = 'Read (Ch. 1)';
+        targetCh = 1;
       }
-    }
-  }
 
-  // --- NOVEL SWITCHING ---
-  async function switchNovel(novelId, targetChapter = null) {
-    currentNovelId = novelId;
-    currentNovel = novels.find(n => n.id === novelId) || novels[0];
-
-    try {
-      localStorage.setItem('novel_reader_current_novel', novelId);
-    } catch (e) {}
-
-    // Update active tab & header title
-    headerNovelTitle.textContent = `${currentNovel.title} ▾`;
-    document.title = `${currentNovel.title} - Web Reader`;
-
-    document.querySelectorAll('.novel-switch-tab').forEach(t => {
-      t.classList.toggle('active', t.dataset.novel === novelId);
-    });
-
-    document.querySelectorAll('.library-card-item').forEach(c => {
-      c.classList.toggle('active', c.dataset.novel === novelId);
-    });
-
-    // Update Hero Card
-    novelCoverImg.src = currentNovel.cover;
-    novelTitleEl.textContent = currentNovel.title;
-    novelAuthorEl.textContent = currentNovel.author;
-    metaChaptersEl.textContent = `${currentNovel.total_chapters.toLocaleString()} Chapters`;
-    metaVolumesEl.textContent = `${currentNovel.volumes_count} Volumes`;
-    novelSynopsisEl.textContent = currentNovel.synopsis;
-
-    // Fetch this novel's TOC
-    await fetchTOC(novelId);
-
-    // Navigate to chapter or home
-    if (targetChapter && targetChapter >= 1 && targetChapter <= currentNovel.total_chapters) {
-      showReaderView(targetChapter);
-    } else {
-      showHomeView();
-    }
-  }
-
-  function renderNovelSwitchBar() {
-    novelSwitchBar.innerHTML = '';
-    novels.forEach(n => {
-      const tab = document.createElement('div');
-      tab.className = `novel-switch-tab ${n.id === currentNovelId ? 'active' : ''}`;
-      tab.dataset.novel = n.id;
-      tab.innerHTML = `
-        <span class="novel-tab-dot"></span>
-        <span>${escapeHTML(n.title)}</span>
-        <span class="novel-tab-badge">${n.total_chapters} ch</span>
-      `;
-      tab.addEventListener('click', () => {
-        if (currentNovelId !== n.id) {
-          window.location.hash = `#${n.id}`;
-        }
-      });
-      novelSwitchBar.appendChild(tab);
-    });
-  }
-
-  function renderLibraryCards() {
-    libraryCardsList.innerHTML = '';
-    novels.forEach(n => {
       const card = document.createElement('div');
-      card.className = `library-card-item ${n.id === currentNovelId ? 'active' : ''}`;
-      card.dataset.novel = n.id;
+      card.className = 'novel-grid-card';
       card.innerHTML = `
-        <img src="${n.cover}" alt="${escapeHTML(n.title)}" class="library-card-thumb" onerror="this.style.display='none'">
-        <div class="library-card-details">
-          <div class="library-card-title">${escapeHTML(n.title)}</div>
-          <div class="library-card-author">By ${escapeHTML(n.author)}</div>
-          <div class="library-card-stats">${n.total_chapters} Chapters • ${n.status}</div>
+        <div class="novel-grid-thumb-wrap" style="cursor:pointer;">
+          <img src="${n.cover}" alt="${escapeHTML(n.title)}" class="novel-grid-thumb" onerror="this.src='${n.cover_fallback||n.cover}'">
+        </div>
+        <div class="novel-grid-info">
+          <div class="novel-grid-top">
+            ${badgeHtml}
+            <span style="font-size:11px; color:var(--text-muted);">${n.status}</span>
+          </div>
+          <h3 class="novel-grid-title" title="${escapeHTML(n.title)}" style="cursor:pointer;">${escapeHTML(n.title)}</h3>
+          <div class="novel-grid-author">By ${escapeHTML(n.author)}</div>
+          <div class="novel-grid-stats">${n.total_chapters.toLocaleString()} Chapters • ${n.volumes_count} Volumes</div>
+          <div class="novel-grid-synopsis">${escapeHTML(n.synopsis)}</div>
+          <div class="novel-grid-actions">
+            <button class="btn btn-primary btn-small btn-grid-read">
+              ${readBtnText}
+            </button>
+            <button class="btn btn-secondary btn-small btn-grid-chaps">
+              Chapters
+            </button>
+          </div>
         </div>
       `;
-      card.addEventListener('click', () => {
-        closeModals();
-        window.location.hash = `#${n.id}`;
+
+      card.querySelector('.novel-grid-thumb-wrap').addEventListener('click', () => {
+        window.location.hash = `#novel/${n.id}`;
       });
-      libraryCardsList.appendChild(card);
+      card.querySelector('.novel-grid-title').addEventListener('click', () => {
+        window.location.hash = `#novel/${n.id}`;
+      });
+      card.querySelector('.btn-grid-read').addEventListener('click', () => {
+        window.location.hash = `#read/${n.id}/${targetCh}`;
+      });
+      card.querySelector('.btn-grid-chaps').addEventListener('click', () => {
+        window.location.hash = `#novel/${n.id}`;
+      });
+
+      frag.appendChild(card);
     });
+
+    novelsGrid.appendChild(frag);
   }
 
-  // --- FETCH TOC FOR CURRENT NOVEL ---
+  // --- VIEW 2: NOVEL DETAIL & TABLE OF CONTENTS ---
+  async function showNovelDetailView(novelId) {
+    const novel = novels.find(n => n.id === novelId);
+    if (!novel) {
+      showLibraryView();
+      return;
+    }
+
+    currentNovelId = novel.id;
+    currentNovel = novel;
+    currentView = 'novel';
+
+    try {
+      localStorage.setItem('novel_reader_current_novel', novel.id);
+    } catch (e) {}
+
+    libraryView.style.display = 'none';
+    novelDetailView.style.display = 'block';
+    readerView.style.display = 'none';
+    document.body.classList.remove('in-reader-mode');
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    // Header State
+    headerLogoText.style.display = 'none';
+    headerNovelTitle.textContent = novel.title;
+    headerChapterTitle.textContent = '';
+    btnChapters.style.display = 'none';
+    setNavVisibility(false);
+    document.title = `${novel.title} - Donghua Reader`;
+
+    // Populate Hero Card
+    novelCoverImg.src = novel.cover;
+    novelCoverImg.dataset.fallback = novel.cover_fallback || novel.cover;
+    novelTitleEl.textContent = novel.title;
+    novelAuthorEl.textContent = novel.author;
+    metaChaptersEl.textContent = `${novel.total_chapters.toLocaleString()} Chapters`;
+    metaVolumesEl.textContent = `${novel.volumes_count} Volumes`;
+    metaStatusEl.textContent = novel.status || 'Completed Story';
+    novelSynopsisEl.textContent = novel.synopsis;
+
+    // Fetch this novel's TOC
+    await fetchTOC(novel.id);
+  }
+
   async function fetchTOC(novelId) {
     try {
       chapterListContainer.innerHTML = '<div class="loading-state">Loading chapters...</div>';
@@ -382,16 +489,11 @@
     }
   }
 
-  // --- HOME VIEW LOGIC ---
   function updateContinueButton() {
-    let last = 1;
-    try {
-      const stored = localStorage.getItem(`novel_last_chapter_${currentNovelId}`);
-      if (stored) last = parseInt(stored, 10);
-    } catch (e) {}
-
+    const saved = getUserNovelProgress(currentNovelId);
+    const last = saved !== null ? saved : 1;
     currentChapterId = last;
-    if (last > 1 && tocData) {
+    if (saved !== null && saved > 1 && tocData) {
       const chap = tocData.chapters.find(c => c.id === last);
       const cleanTitle = chap ? chap.title.replace(/^Chapter\s+\d+\s*[-:]?\s*/i, '') : '';
       continueText.textContent = `Continue Ch. ${last}: ${cleanTitle}`;
@@ -456,16 +558,17 @@
       return;
     }
 
+    const savedProg = getUserNovelProgress(currentNovelId);
     const frag = document.createDocumentFragment();
     chaptersToRender.forEach(c => {
       const card = document.createElement('div');
-      card.className = `chapter-card-item ${c.id === currentChapterId ? 'current-reading' : ''}`;
+      card.className = `chapter-card-item ${savedProg !== null && c.id === savedProg ? 'current-reading' : ''}`;
       card.innerHTML = `
         <span class="chapter-card-num">Chapter ${c.id}</span>
         <span class="chapter-card-title">${escapeHTML(c.title)}</span>
       `;
       card.addEventListener('click', () => {
-        navigateToChapter(c.id);
+        window.location.hash = `#read/${currentNovelId}/${c.id}`;
       });
       frag.appendChild(card);
     });
@@ -473,63 +576,61 @@
     chapterListContainer.appendChild(frag);
   }
 
-  // --- READER VIEW LOGIC ---
-  async function showReaderView(chapterId) {
+  // --- VIEW 3: CHAPTER READER VIEW ---
+  async function showReaderView(novelId, chapterId) {
+    const novel = novels.find(n => n.id === novelId);
+    if (!novel) {
+      showLibraryView();
+      return;
+    }
+
+    currentNovelId = novel.id;
+    currentNovel = novel;
     currentChapterId = chapterId;
     currentView = 'reader';
 
-    homeView.style.display = 'none';
+    try {
+      localStorage.setItem('novel_reader_current_novel', novel.id);
+      localStorage.setItem(`novel_last_chapter_${novel.id}`, chapterId);
+    } catch (e) {}
+
+    libraryView.style.display = 'none';
+    novelDetailView.style.display = 'none';
     readerView.style.display = 'block';
     document.body.classList.add('in-reader-mode');
     window.scrollTo({ top: 0, behavior: 'instant' });
 
-    // Update Header
-    headerNovelTitle.textContent = currentNovel.title;
+    // Header State
+    headerLogoText.style.display = 'none';
+    headerNovelTitle.textContent = novel.title;
     headerChapterTitle.textContent = `Ch. ${chapterId}`;
-    if (tocData) {
-      const chapMeta = tocData.chapters.find(c => c.id === chapterId);
-      if (chapMeta) {
-        headerChapterTitle.textContent = `Ch. ${chapterId}: ${chapMeta.title.replace(/^Chapter\s+\d+\s*[-:]?\s*/i, '')}`;
-      }
-    }
+    btnChapters.style.display = 'inline-flex';
 
-    // Save Last Read for current novel
-    try {
-      localStorage.setItem(`novel_last_chapter_${currentNovelId}`, chapterId);
-    } catch (e) {}
-
-    // Reset navigation visibility to show header initially
     setNavVisibility(false);
     lastScrollY = 0;
 
-    await loadChapterContent(chapterId);
+    if (!tocData || tocData.id !== novelId) {
+      fetchTOC(novelId).catch(console.error);
+    }
+
+    await loadChapterContent(novelId, chapterId);
     updateNavButtons();
   }
 
-  function showHomeView() {
-    currentView = 'home';
-    homeView.style.display = 'block';
-    readerView.style.display = 'none';
-    document.body.classList.remove('in-reader-mode');
-    headerNovelTitle.textContent = `${currentNovel ? currentNovel.title : 'Novels'} ▾`;
-    headerChapterTitle.textContent = '';
-    setNavVisibility(false);
-    updateContinueButton();
-  }
-
-  async function loadChapterContent(id) {
+  async function loadChapterContent(novelId, chapterId) {
     chapterBodyEl.innerHTML = '<div class="loading-state">Loading chapter content...</div>';
-    chapterTitleEl.textContent = `Chapter ${id}`;
+    chapterTitleEl.textContent = `Chapter ${chapterId}`;
     chapterVolumeTag.textContent = '';
 
     try {
-      const res = await fetch(`data/${currentNovelId}/chapters/${id}.json`);
+      const res = await fetch(`data/${novelId}/chapters/${chapterId}.json`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       currentChapterData = data;
 
       chapterTitleEl.textContent = data.title;
       chapterVolumeTag.textContent = data.volume || '';
+      document.title = `${data.title} - ${currentNovel.title}`;
 
       let html = '';
       data.paragraphs.forEach(p => {
@@ -537,19 +638,19 @@
       });
       chapterBodyEl.innerHTML = html;
 
-      restoreScrollPosition(id);
+      restoreScrollPosition(novelId, chapterId);
     } catch (err) {
       console.error('Error loading chapter:', err);
       chapterBodyEl.innerHTML = `
         <div class="loading-state" style="color:#ef4444;">
-          Failed to load Chapter ${id} for ${escapeHTML(currentNovel.title)}.
+          Failed to load Chapter ${chapterId} for ${escapeHTML(currentNovel.title)}.
         </div>`;
     }
   }
 
-  function restoreScrollPosition(id) {
+  function restoreScrollPosition(novelId, id) {
     try {
-      const key = `novel_scroll_${currentNovelId}_${id}`;
+      const key = `novel_scroll_${novelId}_${id}`;
       const savedY = sessionStorage.getItem(key);
       if (savedY) {
         window.scrollTo({ top: parseInt(savedY, 10), behavior: 'smooth' });
@@ -562,7 +663,7 @@
   }
 
   function updateNavButtons() {
-    const total = tocData ? tocData.total_chapters : 1000;
+    const total = currentNovel ? currentNovel.total_chapters : 1000;
     const isFirst = currentChapterId <= 1;
     const isLast = currentChapterId >= total;
 
@@ -576,10 +677,58 @@
   }
 
   function navigateToChapter(id) {
-    const total = tocData ? tocData.total_chapters : 1000;
+    const total = currentNovel ? currentNovel.total_chapters : 1000;
     if (id < 1 || id > total) return;
-    window.location.hash = `#${currentNovelId}/${id}`;
+    window.location.hash = `#read/${currentNovelId}/${id}`;
     closeModals();
+  }
+
+  // --- ROUTING ---
+  function parseInitialRoute() {
+    const hash = window.location.hash || '';
+    handleRouteString(hash);
+  }
+
+  function handleHashChange() {
+    const hash = window.location.hash || '';
+    handleRouteString(hash);
+  }
+
+  function handleRouteString(hash) {
+    const clean = hash.replace(/^#/, '').trim();
+    if (!clean || clean === 'library') {
+      showLibraryView();
+      return;
+    }
+
+    const parts = clean.split('/');
+
+    // Formats:
+    // 1. #read/<novelId>/<chapterId>
+    if (parts[0] === 'read' && parts[1] && parts[2]) {
+      showReaderView(parts[1], parseInt(parts[2], 10));
+      return;
+    }
+
+    // 2. #novel/<novelId>
+    if (parts[0] === 'novel' && parts[1]) {
+      showNovelDetailView(parts[1]);
+      return;
+    }
+
+    // 3. #<novelId>/<chapterId> (shortcut)
+    const directNovel = novels.find(n => n.id === parts[0].toLowerCase());
+    if (directNovel) {
+      if (parts[1]) {
+        showReaderView(directNovel.id, parseInt(parts[1], 10));
+      } else {
+        showNovelDetailView(directNovel.id);
+      }
+      return;
+    }
+
+    // Default to Library
+    showLibraryView();
   }
 
   // --- CHAPTER DRAWER MODAL ---
@@ -651,47 +800,62 @@
     }, 50);
   }
 
-  function openLibraryModal() {
-    modalLibrary.style.display = 'flex';
-  }
-
   function openSettingsModal() {
     modalSettings.style.display = 'flex';
   }
 
   function closeModals() {
-    modalLibrary.style.display = 'none';
     modalChapters.style.display = 'none';
     modalSettings.style.display = 'none';
   }
 
   // --- EVENT LISTENERS ---
   function initEventListeners() {
-    // Header Buttons
-    btnHome.addEventListener('click', () => {
+    // Header back / library button
+    btnHeaderBack.addEventListener('click', () => {
       if (currentView === 'reader') {
-        window.location.hash = `#${currentNovelId}`;
+        window.location.hash = `#novel/${currentNovelId}`;
+      } else if (currentView === 'novel') {
+        window.location.hash = '#library';
       } else {
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     });
 
-    headerNovelTitle.addEventListener('click', openLibraryModal);
-    btnLibrary.addEventListener('click', openLibraryModal);
-    btnMobileLibrary.addEventListener('click', openLibraryModal);
+    btnBackToLibrary.addEventListener('click', () => {
+      window.location.hash = '#library';
+    });
+
+    headerNovelTitle.addEventListener('click', () => {
+      if (currentView === 'reader') {
+        window.location.hash = `#novel/${currentNovelId}`;
+      }
+    });
+
     btnChapters.addEventListener('click', openChaptersModal);
     btnSettings.addEventListener('click', openSettingsModal);
+
+    // Mobile Bottom Nav
+    btnMobileLibrary.addEventListener('click', () => {
+      window.location.hash = '#library';
+    });
     btnMobileChapters.addEventListener('click', openChaptersModal);
     btnMobileSettings.addEventListener('click', openSettingsModal);
 
+    // Shelf Filters
+    document.querySelectorAll('.shelf-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.shelf-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        shelfFilter = btn.dataset.filter;
+        renderNovelsGrid();
+      });
+    });
+
     // Modal Close
-    btnCloseLibrary.addEventListener('click', closeModals);
     btnCloseChapters.addEventListener('click', closeModals);
     btnCloseSettings.addEventListener('click', closeModals);
 
-    modalLibrary.addEventListener('click', e => {
-      if (e.target === modalLibrary) closeModals();
-    });
     modalChapters.addEventListener('click', e => {
       if (e.target === modalChapters) closeModals();
     });
@@ -699,7 +863,7 @@
       if (e.target === modalSettings) closeModals();
     });
 
-    // Home Actions
+    // Novel Detail Actions
     btnContinue.addEventListener('click', () => {
       navigateToChapter(currentChapterId || 1);
     });
@@ -729,7 +893,7 @@
 
     function executeJump() {
       const val = parseInt(jumpInput.value, 10);
-      const total = tocData ? tocData.total_chapters : 1000;
+      const total = currentNovel ? currentNovel.total_chapters : 1000;
       if (!isNaN(val) && val >= 1 && val <= total) {
         navigateToChapter(val);
         jumpInput.value = '';
@@ -747,7 +911,7 @@
 
     document.querySelectorAll('.btn-next-chapter').forEach(btn => {
       btn.addEventListener('click', () => {
-        const total = tocData ? tocData.total_chapters : 1000;
+        const total = currentNovel ? currentNovel.total_chapters : 1000;
         if (currentChapterId < total) navigateToChapter(currentChapterId + 1);
       });
     });
@@ -893,21 +1057,17 @@
           navigateToChapter(currentChapterId - 1);
         }
       } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-        const total = tocData ? tocData.total_chapters : 1000;
+        const total = currentNovel ? currentNovel.total_chapters : 1000;
         if (currentView === 'reader' && currentChapterId < total) {
           navigateToChapter(currentChapterId + 1);
         }
       } else if (e.key === 't' || e.key === 'T' || e.key === 'c' || e.key === 'C') {
-        if (modalChapters.style.display === 'flex') {
-          closeModals();
-        } else {
-          openChaptersModal();
-        }
-      } else if (e.key === 'l' || e.key === 'L') {
-        if (modalLibrary.style.display === 'flex') {
-          closeModals();
-        } else {
-          openLibraryModal();
+        if (currentView === 'reader') {
+          if (modalChapters.style.display === 'flex') {
+            closeModals();
+          } else {
+            openChaptersModal();
+          }
         }
       } else if (e.key === 's' || e.key === 'S') {
         if (modalSettings.style.display === 'flex') {
