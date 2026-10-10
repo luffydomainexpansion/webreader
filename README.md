@@ -40,16 +40,3 @@ A lightweight, modern, responsive static web novel reader designed for comfortab
 1. Double-click `start_reader.bat` (or run `python serve.py`).
 2. Opens `http://localhost:8000` automatically on your laptop.
 3. Open the phone URL printed in the terminal (e.g. `http://192.168.1.X:8000`) on your phone or tablet on the same Wi-Fi.
-
-### 2. Deploy to Render (e.g. `webreader.onrender.com`)
-1. Push this `web_reader` folder to a GitHub repository.
-2. Go to [render.com](https://render.com) and click **New +** -> **Static Site**.
-3. Connect your repository.
-4. Set:
-   - **Publish directory**: `web_reader` (or `.` if the repo is just this folder).
-5. Choose your subdomain (e.g. `webreader` to get `webreader.onrender.com`).
-6. Click **Create Static Site**. It will deploy for free!
-
-### 3. Deploy to Vercel / Netlify / Cloudflare Pages
-- **Vercel**: Import your repo, set Root Directory to `web_reader`, and click Deploy.
-- **Netlify**: Drag and drop the `web_reader` folder directly into [app.netlify.com/drop](https://app.netlify.com/drop).
