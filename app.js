@@ -311,7 +311,7 @@
     spotlightSection.innerHTML = `
       <div class="spotlight-card">
         <div class="novel-cover-wrap" style="width:140px; min-width:120px;">
-          <img src="${novel.cover}" alt="${escapeHTML(novel.title)}" class="novel-cover" onerror="this.src='${novel.cover_fallback||novel.cover}'">
+          <img src="${novel.cover}" alt="${escapeHTML(novel.title)}" class="novel-cover" loading="lazy" decoding="async" onerror="this.src='${novel.cover_fallback||novel.cover}'">
         </div>
         <div class="novel-info">
           <div class="spotlight-badge">${badgeText}</div>
@@ -383,7 +383,7 @@
       card.className = 'novel-grid-card';
       card.innerHTML = `
         <div class="novel-grid-thumb-wrap" style="cursor:pointer;">
-          <img src="${n.cover}" alt="${escapeHTML(n.title)}" class="novel-grid-thumb" onerror="this.src='${n.cover_fallback||n.cover}'">
+          <img src="${n.cover}" alt="${escapeHTML(n.title)}" class="novel-grid-thumb" loading="lazy" decoding="async" onerror="this.src='${n.cover_fallback||n.cover}'">
         </div>
         <div class="novel-grid-info">
           <div class="novel-grid-top">

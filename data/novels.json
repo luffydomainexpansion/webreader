@@ -26,8 +26,7 @@
     "total_chapters": 3463,
     "volumes_count": 35,
     "status": "Completed Story",
-    "cover": "https://m.media-amazon.com/images/S/compressed.photo.goodreads.com/books/1534327269i/41148385.jpg",
-    "cover_fallback": "data/supergene/cover.jpg",
+    "cover": "data/supergene/cover.jpg",
     "synopsis": "In the magnificent interstellar era, humanity evolved to enter God's Sanctuary. By consuming the flesh of sacred-blood creatures, humans obtain geno points and evolve to godlike ranks. Han Sen, mocked as the 'Ass Man', begins his rise to supremacy by hunting dimensional creatures as Dollar."
   }
 ]
