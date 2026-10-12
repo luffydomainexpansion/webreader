@@ -213,10 +213,6 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       novels = await res.json();
 
-      updateShelfCounters();
-      renderSpotlightCard();
-      renderNovelsGrid();
-
       parseInitialRoute();
       window.addEventListener('hashchange', handleHashChange);
     } catch (err) {
@@ -469,23 +465,36 @@
   }
 
   async function fetchTOC(novelId) {
+    if (tocData && tocData.id === novelId) {
+      renderVolumePills();
+      renderChapterList();
+      renderModalVolumePills();
+      updateContinueButton();
+      return;
+    }
     try {
-      chapterListContainer.innerHTML = '<div class="loading-state">Loading chapters...</div>';
+      if (chapterListContainer) {
+        chapterListContainer.innerHTML = '<div class="loading-state">Loading chapters...</div>';
+      }
       const res = await fetch(`data/${novelId}/toc.json`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       tocData = await res.json();
+      tocData.id = novelId;
 
       currentVolFilter = 'all';
+      modalVolFilter = 'all';
       renderVolumePills();
       renderChapterList();
       renderModalVolumePills();
       updateContinueButton();
     } catch (err) {
       console.error(`Error loading TOC for ${novelId}:`, err);
-      chapterListContainer.innerHTML = `
-        <div class="loading-state" style="color:#ef4444;">
-          Failed to load Table of Contents for ${escapeHTML(currentNovel.title)}.
-        </div>`;
+      if (chapterListContainer) {
+        chapterListContainer.innerHTML = `
+          <div class="loading-state" style="color:#ef4444;">
+            Failed to load Table of Contents for ${escapeHTML(currentNovel ? currentNovel.title : novelId)}.
+          </div>`;
+      }
     }
   }
 
@@ -609,10 +618,6 @@
     setNavVisibility(false);
     lastScrollY = 0;
 
-    if (!tocData || tocData.id !== novelId) {
-      fetchTOC(novelId).catch(console.error);
-    }
-
     await loadChapterContent(novelId, chapterId);
     updateNavButtons();
   }
@@ -653,7 +658,7 @@
       const key = `novel_scroll_${novelId}_${id}`;
       const savedY = sessionStorage.getItem(key);
       if (savedY) {
-        window.scrollTo({ top: parseInt(savedY, 10), behavior: 'smooth' });
+        window.scrollTo({ top: parseInt(savedY, 10), behavior: 'instant' });
       } else {
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
@@ -790,9 +795,13 @@
     modalChaptersList.appendChild(frag);
   }
 
-  function openChaptersModal() {
+  async function openChaptersModal() {
     modalChapters.style.display = 'flex';
     modalSearch.value = '';
+    if (!tocData || tocData.id !== currentNovelId) {
+      modalChaptersList.innerHTML = '<div class="loading-state">Loading chapters...</div>';
+      await fetchTOC(currentNovelId);
+    }
     renderModalChaptersList();
     setTimeout(() => {
       const currentEl = modalChaptersList.querySelector('.current');
